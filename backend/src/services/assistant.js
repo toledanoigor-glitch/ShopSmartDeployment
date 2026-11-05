@@ -1,30 +1,98 @@
+const STOP_WORDS = new Set([
+  'the', 'and', 'for', 'you', 'your', 'are', 'can', 'any', 'have', 'has', 'what', 'which', 'who',
+  'how', 'that', 'this', 'with', 'want', 'need', 'looking', 'find', 'show', 'give', 'get', 'buy',
+  'sell', 'there', 'one', 'some', 'good', 'best', 'cheap', 'cheapest', 'recommend', 'please',
+  'below', 'under', 'less', 'than', 'within', 'budget', 'max', 'maximum', 'price', 'cost', 'php',
+  'peso', 'pesos', 'shopsmart', 'product', 'products', 'item', 'items', 'something', 'does', 'from'
+]);
+
+export const PUBLIC_PRODUCT_FIELDS = { id: true, name: true, description: true, category: true, price: true, stock: true };
+
 export function parseBudget(question) {
   const normalized = question.replaceAll(',', '');
-  const match = normalized.match(/(?:₱|php\s*)?(\d{2,6})(?:\.\d{1,2})?/i);
+  const match = normalized.match(
+    /(?:₱|php\s*|(?:below|under|less than|up to|within|max(?:imum)?|budget(?: of| is)?|cheaper than)\s*₱?\s*)(\d{2,7})(?:\.\d{1,2})?/i
+  );
   return match ? Number(match[1]) : null;
 }
 
+export function extractTerms(question) {
+  return [...new Set(
+    question.toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((term) => term.length > 2 && !STOP_WORDS.has(term) && !/^\d+$/.test(term))
+      .map((term) => (term.length > 3 && term.endsWith('s') && !term.endsWith('ss') ? term.slice(0, -1) : term))
+  )];
+}
+
+export function toProductFacts(product) {
+  return {
+    id: product.id,
+    name: product.name,
+    description: product.description,
+    category: product.category,
+    price: Number(product.price),
+    stock: product.stock
+  };
+}
+
 export function rankProducts(products, question) {
-  const terms = question.toLowerCase().split(/[^a-z0-9]+/).filter((term) => term.length > 2);
+  const terms = extractTerms(question);
   const budget = parseBudget(question);
   return products
-    .filter((product) => product.stock > 0 && (budget === null || Number(product.price) <= budget))
+    .filter((product) => product.active !== false && product.stock > 0)
+    .filter((product) => budget === null || Number(product.price) <= budget)
     .map((product) => {
-      const text = `${product.name} ${product.category} ${product.description}`.toLowerCase();
-      return { ...product, score: terms.reduce((score, term) => score + (text.includes(term) ? 1 : 0), 0) };
+      const name = product.name.toLowerCase();
+      const category = product.category.toLowerCase();
+      const description = product.description.toLowerCase();
+      const score = terms.reduce((total, term) => total
+        + (name.includes(term) ? 3 : 0)
+        + (category.includes(term) ? 2 : 0)
+        + (description.includes(term) ? 1 : 0), 0);
+      return { ...product, score };
     })
+    .filter((product) => product.score > 0)
     .sort((a, b) => b.score - a.score || Number(a.price) - Number(b.price));
 }
 
-export function buildAssistantResponse(products, question) {
-  const ranked = rankProducts(products, question).slice(0, 3);
-  if (ranked.length === 0) {
-    return { answer: 'I could not find an in-stock product matching that request.', recommendedProducts: [], sources: [] };
+export function selectCandidates(products, question, limit = 3) {
+  const budget = parseBudget(question);
+  const candidates = rankProducts(products, question).slice(0, limit).map(toProductFacts);
+  let reason = null;
+  if (candidates.length === 0) {
+    const anyKeywordMatch = rankProducts(products.map((p) => ({ ...p, stock: 1 })), question.replace(/\d+/g, '')).length > 0;
+    reason = anyKeywordMatch ? 'FILTERED' : 'NO_MATCH';
   }
-  const names = ranked.map((product) => product.name).join(', ');
+  return { budget, candidates, reason };
+}
+
+const peso = (value) => `₱${Number(value).toLocaleString('en-PH')}`;
+
+export function buildRuleBasedAnswer({ candidates, budget, reason }) {
+  if (candidates.length === 0) {
+    if (reason === 'FILTERED') {
+      return budget !== null
+        ? `I found related products, but none are in stock at or below ${peso(budget)} right now.`
+        : 'I found related products, but none are in stock right now.';
+    }
+    return 'Sorry, I could not find a product in the current ShopSmart catalog that matches that request.';
+  }
+  const list = candidates.map((p) => `${p.name} (${peso(p.price)}, ${p.stock} in stock)`).join('; ');
+  const budgetText = budget !== null ? ` at or below ${peso(budget)}` : '';
+  return `Based on the current ShopSmart catalog, these in-stock products match your request${budgetText}: ${list}.`;
+}
+
+export function formatResponse(answer, candidates, extra = {}) {
   return {
-    answer: `Based on the current ShopSmart catalog, consider: ${names}. This starter response uses rules rather than a generative AI model.`,
-    recommendedProducts: ranked.map(({ id, name, price, category }) => ({ id, name, price: Number(price), category })),
-    sources: ranked.map(({ id, name }) => ({ type: 'product', id, name }))
+    answer,
+    recommendedProducts: candidates.map(({ id, name, price, category, stock }) => ({ id, name, price, category, stock })),
+    sources: candidates.map(({ id, name }) => ({ type: 'product', id, name })),
+    ...extra
   };
+}
+
+export function buildAssistantResponse(products, question) {
+  const selection = selectCandidates(products, question);
+  return formatResponse(buildRuleBasedAnswer(selection), selection.candidates, { mode: 'rules' });
 }
