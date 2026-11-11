@@ -1,16 +1,30 @@
-import React, { createContext, useContext, useMemo, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import {
   addProductToCart,
   calculateCartItemCount,
   calculateCartTotal,
+  loadCart,
+  saveCart,
   updateCartQuantity
 } from '../utils/cart.js';
 
 const CartContext = createContext(null);
 
+function getStorage() {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
 export function CartProvider({ children }) {
-  const [cart, setCart] = useState([]);
+  const [cart, setCart] = useState(() => loadCart(getStorage()));
   const [cartMessage, setCartMessage] = useState('');
+
+  useEffect(() => {
+    saveCart(getStorage(), cart);
+  }, [cart]);
 
   function addToCart(product) {
     setCart((currentCart) => {

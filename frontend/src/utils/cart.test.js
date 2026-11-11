@@ -3,8 +3,15 @@ import {
   addProductToCart,
   calculateCartItemCount,
   calculateCartTotal,
+  loadCart,
+  saveCart,
   updateCartQuantity
 } from './cart.js';
+
+function memoryStorage() {
+  const data = new Map();
+  return { getItem: (key) => data.get(key) ?? null, setItem: (key, value) => data.set(key, value) };
+}
 
 describe('cart utilities', () => {
   it('calculates the cart total', () => {
@@ -29,5 +36,20 @@ describe('cart utilities', () => {
     expect(calculateCartItemCount([{ quantity: 2 }, { quantity: 3 }])).toBe(5);
     expect(calculateCartItemCount([])).toBe(0);
   });
-  
+
+  it('keeps the cart after a page refresh', () => {
+    const storage = memoryStorage();
+    const cart = [{ productId: 1, name: 'Mouse', price: 650, stock: 12, quantity: 2 }];
+    saveCart(storage, cart);
+    expect(loadCart(storage)).toEqual(cart);
+    expect(calculateCartTotal(loadCart(storage))).toBe(1300);
+  });
+
+  it('starts with an empty cart when saved data is missing or broken', () => {
+    expect(loadCart(memoryStorage())).toEqual([]);
+    const storage = memoryStorage();
+    storage.setItem('shopsmart-cart', 'not json');
+    expect(loadCart(storage)).toEqual([]);
+    expect(loadCart(null)).toEqual([]);
+  });
 });

@@ -57,3 +57,31 @@ export function updateCartQuantity(cart, productId, quantity) {
 export function calculateCartItemCount(cart) {
   return cart.reduce((count, item) => count + item.quantity, 0);
 }
+
+export const CART_STORAGE_KEY = 'shopsmart-cart';
+
+function isValidCartItem(item) {
+  return Number.isInteger(item?.productId)
+    && typeof item.name === 'string'
+    && Number.isFinite(item.price)
+    && Number.isInteger(item.stock)
+    && Number.isInteger(item.quantity)
+    && item.quantity > 0;
+}
+
+export function loadCart(storage) {
+  try {
+    const saved = JSON.parse(storage?.getItem(CART_STORAGE_KEY) || '[]');
+    return Array.isArray(saved) ? saved.filter(isValidCartItem) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveCart(storage, cart) {
+  try {
+    storage?.setItem(CART_STORAGE_KEY, JSON.stringify(cart));
+  } catch {
+    return;
+  }
+}
