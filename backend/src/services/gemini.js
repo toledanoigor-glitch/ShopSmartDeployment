@@ -47,7 +47,7 @@ export function parseDraft(text) {
 
 export async function draftWithGemini({ question, candidates, budget }, options = {}) {
   const apiKey = options.apiKey ?? process.env.GEMINI_API_KEY;
-  const model = options.model ?? process.env.GEMINI_MODEL ?? 'gemini-3.8-flash';
+  const model = options.model ?? process.env.GEMINI_MODEL ?? 'gemini-3.5-flash-lite';
   const timeoutMs = Number(options.timeoutMs ?? process.env.GEMINI_TIMEOUT_MS ?? 8000);
   const fetchImpl = options.fetchImpl ?? fetch;
 

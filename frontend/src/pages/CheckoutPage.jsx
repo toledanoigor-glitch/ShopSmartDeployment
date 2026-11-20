@@ -2,12 +2,14 @@ import React from 'react';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import StatusMessage from '../components/StatusMessage.jsx';
+import { useAuth } from '../context/AuthContext.jsx';
 import { useCart } from '../context/CartContext.jsx';
 import { api } from '../services/api.js';
 
 export default function CheckoutPage() {
   const { cart, total, clearCart } = useCart();
-  const [form, setForm] = useState({ customerName: '', email: '', address: '' });
+  const { user, checking } = useAuth();
+  const [form, setForm] = useState({ customerName: user?.name || '', email: user?.email || '', address: '' });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [order, setOrder] = useState(null);
@@ -28,7 +30,7 @@ export default function CheckoutPage() {
       setOrder(created);
       clearCart();
     } catch (caught) {
-      setError(caught.message);
+      setError(caught.status === 401 ? 'Your session has ended. Please sign in again.' : caught.message);
     } finally {
       setSubmitting(false);
     }
@@ -40,8 +42,18 @@ export default function CheckoutPage() {
       <h1>Thank you, {order.customerName}!</h1>
       <p>Your simulated order number is <strong>#{order.id}</strong>.</p>
       <p>Total: <strong>₱{Number(order.total).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong></p>
-      <Link className="button" to="/">Continue shopping</Link>
+      <Link className="button" to="/account">View my orders</Link> <Link className="button secondary" to="/">Continue shopping</Link>
     </section>
+  );
+
+  if (checking) return <section><StatusMessage>Checking your sign-in…</StatusMessage></section>;
+  if (!user) return (
+    <section><div className="empty-state">
+      <p className="eyebrow">SIGN IN REQUIRED</p>
+      <h1>Please sign in to place your order</h1>
+      <p>Your cart is saved and will still be here.</p>
+      <Link className="button" to="/login" state={{ from: '/checkout' }}>Sign in or create an account</Link>
+    </div></section>
   );
 
   if (cart.length === 0) return <section><div className="empty-state"><h1>Your cart is empty</h1><Link className="button" to="/">Browse products</Link></div></section>;

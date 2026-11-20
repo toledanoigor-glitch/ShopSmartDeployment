@@ -1,10 +1,50 @@
 import { Router } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
+import { canReadOrder } from '../lib/auth.js';
+import { requireUser } from '../middleware/requireUser.js';
 import { orderSchema } from '../validators/schemas.js';
 const router = Router();
 
-router.post('/', async (request, response, next) => {
+function serializeOrder(order) {
+  return {
+    id: order.id,
+    customerName: order.customerName,
+    email: order.email,
+    address: order.address,
+    status: order.status,
+    total: Number(order.total),
+    createdAt: order.createdAt,
+    items: order.items.map((item) => ({
+      productId: item.productId,
+      name: item.product?.name,
+      quantity: item.quantity,
+      unitPrice: Number(item.unitPrice)
+    }))
+  };
+}
+
+const orderInclude = { items: { include: { product: { select: { name: true } } } } };
+
+router.get('/', requireUser, async (request, response, next) => {
+  try {
+    const orders = await prisma.order.findMany({ where: { userId: request.user.id }, include: orderInclude, orderBy: { createdAt: 'desc' } });
+    response.json({ orders: orders.map(serializeOrder) });
+  } catch (error) { next(error); }
+});
+
+router.get('/:id', requireUser, async (request, response, next) => {
+  try {
+    const id = Number(request.params.id);
+    if (!Number.isInteger(id) || id < 1) return response.status(400).json({ error: { code: 'INVALID_ORDER_ID', message: 'Order ID must be a positive integer.' } });
+    const order = await prisma.order.findUnique({ where: { id }, include: orderInclude });
+    if (!order) return response.status(404).json({ error: { code: 'ORDER_NOT_FOUND', message: 'Order could not be found.' } });
+    if (!canReadOrder(request.user, order)) return response.status(403).json({ error: { code: 'ORDER_FORBIDDEN', message: 'You can only view your own orders.' } });
+    response.json(serializeOrder(order));
+  } catch (error) { next(error); }
+});
+
+router.post('/', requireUser, async (request, response, next) => {
   try {
     const parsed = orderSchema.safeParse(request.body);
     if (!parsed.success) return response.status(422).json({ error: { code: 'INVALID_ORDER', message: 'Check the customer and cart information.', details: parsed.error.flatten() } });
@@ -29,15 +69,14 @@ router.post('/', async (request, response, next) => {
       }
       return transaction.order.create({
         data: {
-          customerName: parsed.data.customerName, email: parsed.data.email, address: parsed.data.address, total,
+          userId: request.user.id, customerName: parsed.data.customerName, email: parsed.data.email, address: parsed.data.address, total,
           items: { create: normalizedItems.map((item) => ({ productId: item.productId, quantity: item.quantity, unitPrice: item.product.price })) }
         },
-        include: { items: true }
+        include: orderInclude
       });
     });
-    response.status(201).json({ ...order, total: Number(order.total), items: order.items.map((item) => ({ ...item, unitPrice: Number(item.unitPrice) })) });
+    response.status(201).json(serializeOrder(order));
   } catch (error) { next(error); }
 });
 
-// WEEK 4 IMPROVEMENT: Associate orders with authenticated users and add a protected GET route.
 export default router;
